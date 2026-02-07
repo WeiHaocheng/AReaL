@@ -1,0 +1,90 @@
+# RLVR Scaffolding Example Configuration for GSM8K
+#
+# This configuration demonstrates RLVR training using the scaffolding framework.
+# The scaffolding framework provides modular controllers for generation, reward,
+# and trajectory creation that can be composed flexibly.
+
+# Model configuration
+pretrain_path: Qwen/Qwen2.5-3B-Instruct
+tokenizer_path: Qwen/Qwen2.5-3B-Instruct
+
+# Algorithm configuration
+algorithm:
+  type: grpo
+  ppo_epochs: 1
+  cliprange: 0.2
+  cliprange_value: 0.2
+  kl_coef: 0.0
+  entropy_coef: 0.0
+  gamma: 1.0
+  lambd: 1.0
+
+# Training configuration
+train:
+  max_steps: 1000
+  log_interval: 10
+  eval_interval: 100
+  save_interval: 500
+  gradient_accumulation_steps: 1
+  micro_batch_size: 4
+  learning_rate: 1.0e-6
+  weight_decay: 0.01
+  warmup_steps: 50
+  max_grad_norm: 1.0
+
+# Generation hyperparameters
+gconfig:
+  max_new_tokens: 1024
+  temperature: 1.0
+  top_p: 1.0
+  n_samples: 8
+  stop:
+    - "<|endoftext|>"
+    - "<|im_end|>"
+
+# Dataset configuration
+train_dataset:
+  name: gsm8k
+  path: openai/gsm8k
+  type: rl
+  max_length: 2048
+
+valid_dataset:
+  name: gsm8k
+  path: openai/gsm8k
+  type: rl
+  max_length: 2048
+
+# Rollout configuration for scaffolding
+rollout:
+  n_rollout_workers: 4
+  rollout_batch_size: 16
+
+# Scaffolding-specific configuration
+scaffolding:
+  # Enable scaffolding-based workflow
+  enabled: true
+  # Worker configuration - the Worker is created from AReaL's InferenceEngine
+  worker:
+    type: areal_engine
+  # Controller pipeline configuration
+  controllers:
+    generation:
+      type: NativeGenerationController
+      streaming: false
+    reward:
+      type: RLVRRewardController
+      reward_fn: areal.reward.gsm8k.gsm8k_reward_fn
+    trajectory:
+      type: PipelineTrajectoryMaker
+
+# Inference engine configuration
+engine:
+  type: sglang
+  tp: 1
+  max_model_len: 4096
+
+# Experiment tracking
+experiment:
+  name: gsm8k_rlvr_scaffolding
+  output_dir: ./outputs/gsm8k_rlvr_scaffolding
