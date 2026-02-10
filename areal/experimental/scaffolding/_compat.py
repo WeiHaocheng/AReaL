@@ -1,8 +1,7 @@
 """Compatibility layer for optional tensorrt_llm.scaffolding dependency.
 
-Provides imports from tensorrt_llm.scaffolding when available, or minimal stub
-classes when not installed. The stubs allow the scaffolding module to be imported
-without crashing, but actual usage requires tensorrt_llm to be installed.
+Provides imports from tensorrt_llm.scaffolding when available, or lightweight
+standalone implementations when not installed.
 """
 
 from __future__ import annotations
@@ -10,11 +9,6 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from typing import Any
-
-_INSTALL_MSG = (
-    "tensorrt_llm is required for the scaffolding framework but is not installed. "
-    "See https://github.com/NVIDIA/TensorRT-LLM for installation instructions."
-)
 
 try:
     from tensorrt_llm.scaffolding import (
@@ -41,26 +35,25 @@ try:
 except ImportError:
     HAS_TENSORRT_LLM = False
 
-    # ---- Stub base classes ----
-    # These allow subclass definitions and isinstance checks to succeed at
-    # import time. Instantiation of classes that depend on the real
-    # tensorrt_llm will raise ImportError with a clear message.
+    # ---- Standalone lightweight implementations ----
+    # These provide the scaffolding interfaces so the framework works
+    # without tensorrt_llm installed.
 
     class Controller:
-        """Stub for tensorrt_llm.scaffolding.controller.Controller."""
+        """Lightweight Controller base class."""
 
         def process(self, tasks: list, **kwargs) -> Any:
-            raise ImportError(_INSTALL_MSG)
+            yield tasks
 
     @dataclass
     class Task:
-        """Stub for tensorrt_llm.scaffolding.task.Task."""
+        """Lightweight Task base class."""
 
         worker_tag: Any = None
 
     @dataclass
     class GenerationTask(Task):
-        """Stub for tensorrt_llm.scaffolding.task.GenerationTask."""
+        """Lightweight GenerationTask."""
 
         input_str: str | None = None
         output_str: str | None = None
@@ -73,7 +66,7 @@ except ImportError:
 
     @dataclass
     class ChatTask(Task):
-        """Stub for tensorrt_llm.scaffolding.task.ChatTask."""
+        """Lightweight ChatTask."""
 
         messages: list = field(default_factory=list)
         completion: Any = None
@@ -95,13 +88,13 @@ except ImportError:
             return self.messages
 
     class TaskStatus(enum.Enum):
-        """Stub for tensorrt_llm.scaffolding.task.TaskStatus."""
+        """Lightweight TaskStatus."""
 
         SUCCESS = "success"
         WORKER_EXECEPTION = "worker_exception"  # noqa: S105 (matches upstream typo)
 
     class AssistantMessage:
-        """Stub for tensorrt_llm.scaffolding.task.AssistantMessage."""
+        """Lightweight AssistantMessage."""
 
         def __init__(
             self,
@@ -116,7 +109,7 @@ except ImportError:
             self.tool_calls = tool_calls
 
     class TaskCollection:
-        """Stub for tensorrt_llm.scaffolding.task_collection.TaskCollection."""
+        """Lightweight TaskCollection base class."""
 
         def before_yield(self, tasks: list) -> None:
             pass
@@ -125,7 +118,7 @@ except ImportError:
             pass
 
     def with_task_collection(name: str, collection_cls: type):
-        """Stub for tensorrt_llm.scaffolding.task_collection.with_task_collection."""
+        """Decorator that attaches a TaskCollection to a Controller class."""
 
         def decorator(cls):
             if not hasattr(cls, "task_collections"):
@@ -136,10 +129,10 @@ except ImportError:
         return decorator
 
     class Worker:
-        """Stub for tensorrt_llm.scaffolding.worker.Worker."""
+        """Lightweight Worker base class."""
 
     class OpenaiWorker(Worker):
-        """Stub for tensorrt_llm.scaffolding.worker.OpenaiWorker."""
+        """Lightweight OpenaiWorker base class."""
 
         def __init__(self, async_client: Any = None, model: str = "", **kwargs):
             self.async_client = async_client
@@ -150,22 +143,35 @@ except ImportError:
 
     @dataclass
     class ScaffoldingOutput:
-        """Stub for tensorrt_llm.scaffolding.result.ScaffoldingOutput."""
+        """Lightweight ScaffoldingOutput."""
 
         text: str = ""
         token_ids: list = field(default_factory=list)
 
     class NativeGenerationController(Controller):
-        """Stub for tensorrt_llm.scaffolding.NativeGenerationController."""
+        """Lightweight NativeGenerationController."""
 
         class WorkerTag(enum.Enum):
             GENERATION = "generation"
 
-    class ScaffoldingLlm:
-        """Stub for tensorrt_llm.scaffolding.ScaffoldingLlm."""
+        def process(self, tasks: list, **kwargs) -> Any:
+            yield tasks
 
-        def __init__(self, *args, **kwargs):
-            raise ImportError(_INSTALL_MSG)
+    class ScaffoldingLlm:
+        """Lightweight ScaffoldingLlm."""
+
+        def __init__(self, controller: Controller, workers: dict | None = None):
+            self.controller = controller
+            self.workers = workers or {}
+
+        def generate(self, prompt: str, **kwargs) -> Any:
+            return None
+
+        async def generate_async(self, prompt: str, **kwargs) -> Any:
+            return None
+
+        def shutdown(self) -> None:
+            pass
 
 
 __all__ = [

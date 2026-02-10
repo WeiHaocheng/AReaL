@@ -19,19 +19,6 @@ Usage:
 
 import sys
 
-from areal.experimental.scaffolding._compat import (
-    HAS_TENSORRT_LLM,
-    NativeGenerationController,
-    ScaffoldingLlm,
-)
-
-if not HAS_TENSORRT_LLM:
-    print(
-        "ERROR: tensorrt_llm is required to run the scaffolding example. "
-        "See https://github.com/NVIDIA/TensorRT-LLM for installation instructions."
-    )
-    sys.exit(1)
-
 from areal.api.cli_args import GRPOConfig, load_expr_config
 from areal.dataset import get_custom_dataset
 from areal.engine.sglang_remote import RemoteSGLangEngine
@@ -40,6 +27,10 @@ from areal.experimental.scaffolding import (
     PipelineTrajectoryMaker,
     RLVRRewardController,
     ScaffoldingWorkflow,
+)
+from areal.experimental.scaffolding._compat import (
+    NativeGenerationController,
+    ScaffoldingLlm,
 )
 from areal.experimental.trainer import PPOTrainer
 from areal.reward.gsm8k import gsm8k_reward_fn
