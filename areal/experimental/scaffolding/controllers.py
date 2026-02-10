@@ -17,13 +17,17 @@ from collections.abc import Callable
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from tensorrt_llm.scaffolding.controller import Controller
-from tensorrt_llm.scaffolding.task import ChatTask, GenerationTask, Task
-from tensorrt_llm.scaffolding.task_collection import TaskCollection, with_task_collection
-
 from areal.api.reward_api import AsyncRewardWrapper
 from areal.experimental.openai.cache import InteractionCache
 from areal.experimental.openai.types import InteractionWithTokenLogpReward
+from areal.experimental.scaffolding._compat import (
+    ChatTask,
+    Controller,
+    GenerationTask,
+    Task,
+    TaskCollection,
+    with_task_collection,
+)
 from areal.experimental.scaffolding.task import (
     ChatRewardTask,
     RLVRRewardTask,
@@ -32,7 +36,7 @@ from areal.experimental.scaffolding.task import (
 from areal.utils import logging
 
 if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizerFast
+    pass
 
 logger = logging.getLogger("RLVRControllers")
 
@@ -368,8 +372,12 @@ class PipelineTrajectoryMaker(Controller):
         model_response = ModelResponse(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            output_logprobs=list(output_logprobs) if output_logprobs else [0.0] * len(output_tokens),
-            output_versions=list(output_versions) if output_versions else [-1] * len(output_tokens),
+            output_logprobs=list(output_logprobs)
+            if output_logprobs
+            else [0.0] * len(output_tokens),
+            output_versions=list(output_versions)
+            if output_versions
+            else [-1] * len(output_tokens),
         )
 
         # Create interaction
@@ -473,7 +481,9 @@ class ChatTracer(TaskCollection):
         from areal.api.io_struct import ModelResponse
 
         # Extract all messages
-        messages = [msg.to_dict() if hasattr(msg, 'to_dict') else msg for msg in task.messages]
+        messages = [
+            msg.to_dict() if hasattr(msg, "to_dict") else msg for msg in task.messages
+        ]
 
         # Create ModelResponse from task data
         input_tokens = list(task.input_tokens or [])
@@ -638,7 +648,10 @@ class TraceTrajectoryMaker(Controller):
 
             # Update trace_results with computed rewards
             for reward_task in reward_tasks:
-                if reward_task.interaction is not None and reward_task.reward is not None:
+                if (
+                    reward_task.interaction is not None
+                    and reward_task.reward is not None
+                ):
                     reward_task.interaction.reward = reward_task.reward
 
         # Store trace results in the original task

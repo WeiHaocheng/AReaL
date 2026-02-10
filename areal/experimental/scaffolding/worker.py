@@ -7,17 +7,17 @@ for use with TensorRT-LLM's scaffolding framework.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import openai
 
-from tensorrt_llm.scaffolding.task import (
+from areal.experimental.scaffolding._compat import (
     AssistantMessage,
     ChatTask,
     GenerationTask,
+    OpenaiWorker,
     TaskStatus,
 )
-from tensorrt_llm.scaffolding.worker import OpenaiWorker, Worker
 
 if TYPE_CHECKING:
     from areal.engine.sglang_remote import RemoteSGLangEngine
@@ -43,7 +43,7 @@ class SGLangWorker(OpenaiWorker):
         self,
         async_client: openai.AsyncOpenAI,
         model: str,
-        engine: "RemoteSGLangEngine",
+        engine: RemoteSGLangEngine,
     ):
         super().__init__(async_client, model, kv_cache_hint_enabled=False)
         self.engine = engine
@@ -77,12 +77,14 @@ class SGLangWorker(OpenaiWorker):
             task.completion = response
 
             task.finish_reason = response.choices[0].finish_reason
-            if hasattr(response, 'perf_metrics'):
+            if hasattr(response, "perf_metrics"):
                 task.perf_metrics = response.perf_metrics
 
             content = response.choices[0].message.content
-            reasoning = getattr(response.choices[0].message, 'reasoning', None)
-            reasoning_content = getattr(response.choices[0].message, 'reasoning_content', None)
+            reasoning = getattr(response.choices[0].message, "reasoning", None)
+            reasoning_content = getattr(
+                response.choices[0].message, "reasoning_content", None
+            )
             tool_calls = response.choices[0].message.tool_calls
 
             task.messages.append(
@@ -92,13 +94,18 @@ class SGLangWorker(OpenaiWorker):
             if task.enable_token_counting and response.usage:
                 task.prompt_tokens_num = response.usage.prompt_tokens
                 task.completion_tokens_num = response.usage.completion_tokens
-                if hasattr(response.usage, "completion_tokens_details") and response.usage.completion_tokens_details is not None:
-                    task.reasoning_tokens_num = response.usage.completion_tokens_details.reasoning_tokens
+                if (
+                    hasattr(response.usage, "completion_tokens_details")
+                    and response.usage.completion_tokens_details is not None
+                ):
+                    task.reasoning_tokens_num = (
+                        response.usage.completion_tokens_details.reasoning_tokens
+                    )
 
             return TaskStatus.SUCCESS
 
         except Exception as e:
-            print(f'SGLang chat client exception: {e}')
+            print(f"SGLang chat client exception: {e}")
             return TaskStatus.WORKER_EXECEPTION
 
     async def generation_handler(self, task: GenerationTask) -> TaskStatus:
@@ -120,18 +127,18 @@ class SGLangWorker(OpenaiWorker):
             response = await self.async_client.completions.create(**params)
 
             task.output_str = response.choices[0].text
-            if hasattr(response.choices[0], 'token_ids'):
+            if hasattr(response.choices[0], "token_ids"):
                 task.output_tokens = response.choices[0].token_ids
             task.finish_reason = response.choices[0].finish_reason
-            if hasattr(response.choices[0], 'logprobs'):
+            if hasattr(response.choices[0], "logprobs"):
                 task.logprobs = response.choices[0].logprobs
-            if hasattr(response, 'perf_metrics'):
+            if hasattr(response, "perf_metrics"):
                 task.perf_metrics = response.perf_metrics
 
             return TaskStatus.SUCCESS
 
         except Exception as e:
-            print(f'SGLang completion client exception: {e}')
+            print(f"SGLang completion client exception: {e}")
             return TaskStatus.WORKER_EXECEPTION
 
     # Register task handlers
@@ -142,7 +149,7 @@ class SGLangWorker(OpenaiWorker):
 
 
 def CreateWorkerFromEngine(
-    engine: "RemoteSGLangEngine",
+    engine: RemoteSGLangEngine,
     model: str = "default",
 ) -> SGLangWorker:
     """Create a scaffolding Worker from an AReaL SGLang engine.

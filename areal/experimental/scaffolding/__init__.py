@@ -15,8 +15,11 @@ Key Components:
 - ChatRewardTask: Task for computing rewards on traced interactions
 - CreateWorkerFromEngine: Creates a scaffolding Worker from AReaL's InferenceEngine
 - SGLangWorker: Worker implementation for SGLang engines
+
+Note: Requires tensorrt_llm to be installed for full functionality.
 """
 
+from areal.experimental.scaffolding._compat import HAS_TENSORRT_LLM
 from areal.experimental.scaffolding.controllers import (
     ChatTracer,
     PipelineTrajectoryMaker,
@@ -32,6 +35,7 @@ from areal.experimental.scaffolding.worker import CreateWorkerFromEngine, SGLang
 from areal.experimental.scaffolding.workflow import ScaffoldingWorkflow
 
 __all__ = [
+    "HAS_TENSORRT_LLM",
     "ScaffoldingWorkflow",
     "RLVRRewardTask",
     "RLVRRewardController",

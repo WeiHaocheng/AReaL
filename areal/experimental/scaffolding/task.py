@@ -10,8 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from tensorrt_llm.scaffolding.result import ScaffoldingOutput
-from tensorrt_llm.scaffolding.task import ChatTask, GenerationTask, Task
+from areal.experimental.scaffolding._compat import (
+    ChatTask,
+    GenerationTask,
+    ScaffoldingOutput,
+    Task,
+)
 
 if TYPE_CHECKING:
     from areal.experimental.openai.types import InteractionWithTokenLogpReward
@@ -56,7 +60,7 @@ class RLVRRewardTask(Task):
     task_data: dict[str, Any] = field(default_factory=dict)
 
     # The interaction object to update with the reward
-    interaction: "InteractionWithTokenLogpReward | None" = None
+    interaction: InteractionWithTokenLogpReward | None = None
 
     # Output field
     reward: float | None = None
@@ -66,8 +70,8 @@ class RLVRRewardTask(Task):
         gen_task: GenerationTask,
         prompt_str: str,
         task_data: dict[str, Any],
-        interaction: "InteractionWithTokenLogpReward | None" = None,
-    ) -> "RLVRRewardTask":
+        interaction: InteractionWithTokenLogpReward | None = None,
+    ) -> RLVRRewardTask:
         """Create a reward task from a completed generation task.
 
         Parameters
@@ -122,10 +126,10 @@ class TraceGenerationTask(Task):
     generation_task: ChatTask | GenerationTask | None = None
 
     # Output field - trace results after processing
-    trace_results: "dict[str, InteractionWithTokenLogpReward] | None" = None
+    trace_results: dict[str, InteractionWithTokenLogpReward] | None = None
 
     @staticmethod
-    def create_from_prompt(prompt: str) -> "TraceGenerationTask":
+    def create_from_prompt(prompt: str) -> TraceGenerationTask:
         """Create a TraceGenerationTask from a prompt string.
 
         Parameters
@@ -143,7 +147,7 @@ class TraceGenerationTask(Task):
         return TraceGenerationTask(generation_task=chat_task)
 
     @staticmethod
-    def create_from_chat_task(chat_task: ChatTask) -> "TraceGenerationTask":
+    def create_from_chat_task(chat_task: ChatTask) -> TraceGenerationTask:
         """Create a TraceGenerationTask from an existing ChatTask.
 
         Parameters
@@ -167,7 +171,9 @@ class TraceGenerationTask(Task):
             The output containing traced results.
         """
         # Return the trace results as the output
-        if self.generation_task is not None and hasattr(self.generation_task, 'output_str'):
+        if self.generation_task is not None and hasattr(
+            self.generation_task, "output_str"
+        ):
             return ScaffoldingOutput(
                 text=self.generation_task.output_str or "",
                 token_ids=list(self.generation_task.output_tokens or []),
@@ -193,7 +199,7 @@ class ChatRewardTask(Task):
     """
 
     # The traced interaction
-    interaction: "InteractionWithTokenLogpReward | None" = None
+    interaction: InteractionWithTokenLogpReward | None = None
 
     # Interaction ID for reference
     interaction_id: str = field(default="")
@@ -204,8 +210,8 @@ class ChatRewardTask(Task):
     @staticmethod
     def create_from_trace_result(
         interaction_id: str,
-        interaction: "InteractionWithTokenLogpReward",
-    ) -> "ChatRewardTask":
+        interaction: InteractionWithTokenLogpReward,
+    ) -> ChatRewardTask:
         """Create a ChatRewardTask from a trace result.
 
         Parameters

@@ -13,10 +13,9 @@ from areal.api.workflow_api import RolloutWorkflow
 from areal.utils import logging
 
 if TYPE_CHECKING:
-    from tensorrt_llm.scaffolding import ScaffoldingLlm
-
     from areal.api.engine_api import InferenceEngine
     from areal.experimental.openai.types import InteractionWithTokenLogpReward
+    from areal.experimental.scaffolding._compat import ScaffoldingLlm
 
 logger = logging.getLogger("ScaffoldingWorkflow")
 
@@ -61,7 +60,7 @@ class ScaffoldingWorkflow(RolloutWorkflow):
     ```
     """
 
-    def __init__(self, scaffolding_llm: "ScaffoldingLlm"):
+    def __init__(self, scaffolding_llm: ScaffoldingLlm):
         """Initialize the ScaffoldingWorkflow.
 
         Parameters
@@ -73,9 +72,9 @@ class ScaffoldingWorkflow(RolloutWorkflow):
 
     async def arun_episode(
         self,
-        engine: "InferenceEngine",  # noqa: ARG002 - Not used, using self.scaffolding_llm instead
+        engine: InferenceEngine,  # noqa: ARG002 - Not used, using self.scaffolding_llm instead
         data: dict[str, Any],
-    ) -> dict[str, "InteractionWithTokenLogpReward"]:
+    ) -> dict[str, InteractionWithTokenLogpReward]:
         """Run a single episode using the scaffolding framework.
 
         This method uses self.scaffolding_llm for inference and reward
@@ -138,7 +137,7 @@ class ScaffoldingWorkflow(RolloutWorkflow):
         self,
         prompt: str | dict[str, Any],
         data: dict[str, Any],
-    ) -> dict[str, "InteractionWithTokenLogpReward"]:
+    ) -> dict[str, InteractionWithTokenLogpReward]:
         """Run inference through the scaffolding pipeline asynchronously.
 
         Uses the async interface of ScaffoldingLlm (generate_async) to run
