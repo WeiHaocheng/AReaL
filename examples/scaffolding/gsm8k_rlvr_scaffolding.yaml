@@ -75,7 +75,7 @@ actor:
   adv_norm:
     mean_level: batch
     std_level: batch
-  weight_update_mode: xccl
+  weight_update_mode: disk
   max_new_tokens: ${gconfig.max_new_tokens}
   scheduling_spec:
     - task_type: worker
@@ -108,7 +108,7 @@ sglang:
   dtype: ${actor.dtype}
   max_running_requests: null
   context_length: 4096
-  mem_fraction_static: 0.8
+  mem_fraction_static: 0.65
 
 vllm:
   model: ${actor.path}
