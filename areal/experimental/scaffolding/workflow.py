@@ -1,180 +1,165 @@
 """
-ScaffoldingWorkflow - RolloutWorkflow implementation using TensorRT-LLM Scaffolding.
+ScaffoldingWorkflow - RolloutWorkflow implementation using Scaffolding controllers.
 
-This module provides the ScaffoldingWorkflow class that wraps a ScaffoldingLlm
-instance to be used as a RolloutWorkflow in AReaL's training pipeline.
+This module provides the ScaffoldingWorkflow class that uses AReaL's engine
+for generation and scaffolding controllers for reward computation.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import uuid
+from collections.abc import Callable
+from typing import Any
 
+import torch
+from transformers import PreTrainedTokenizerFast
+
+from areal.api.cli_args import GenerationHyperparameters
+from areal.api.engine_api import InferenceEngine
+from areal.api.io_struct import ModelRequest, ModelResponse
+from areal.api.reward_api import AsyncRewardWrapper
 from areal.api.workflow_api import RolloutWorkflow
-from areal.utils import logging
-
-if TYPE_CHECKING:
-    from areal.api.engine_api import InferenceEngine
-    from areal.experimental.openai.types import InteractionWithTokenLogpReward
-    from areal.experimental.scaffolding._compat import ScaffoldingLlm
+from areal.core import workflow_context
+from areal.utils import logging, stats_tracker
+from areal.utils.dynamic_import import import_from_string
+from areal.utils.perf_tracer import (
+    atrace_session_phase,
+    session_context,
+    trace_session,
+)
 
 logger = logging.getLogger("ScaffoldingWorkflow")
 
 
 class ScaffoldingWorkflow(RolloutWorkflow):
-    """RolloutWorkflow implementation using TensorRT-LLM Scaffolding framework.
+    """RolloutWorkflow using scaffolding controllers for reward computation.
 
-    This workflow wraps a ScaffoldingLlm instance and uses it for inference
-    and reward computation instead of the standard InferenceEngine. The
-    scaffolding_llm handles the full pipeline including:
-    - Text generation via NativeGenerationController
-    - Reward computation via RLVRRewardController
-    - Trajectory creation via PipelineTrajectoryMaker
+    Uses AReaL's engine for generation (to get proper token IDs and logprobs)
+    and scaffolding's RLVRRewardController for reward computation.
+
+    This serves as a scaffolding-compatible base workflow that can be extended
+    with custom controllers for multi-step or multi-turn scenarios.
 
     Parameters
     ----------
-    scaffolding_llm : ScaffoldingLlm
-        The configured ScaffoldingLlm instance that orchestrates controllers
-        and workers for the RLVR pipeline.
-
-    Example
-    -------
-    ```python
-    from tensorrt_llm.scaffolding import NativeGenerationController, ScaffoldingLlm
-
-    # Create worker from AReaL engine
-    rollout_worker = CreateWorkerFromEngine(engine)
-
-    # Create controllers
-    rollout_controller = NativeGenerationController()
-    reward_controller = RLVRRewardController(gsm8k_reward_fn)
-    trajectory_maker = PipelineTrajectoryMaker(rollout_controller, reward_controller)
-
-    # Create ScaffoldingLlm
-    scaffolding_llm = ScaffoldingLlm(
-        trajectory_maker,
-        {NativeGenerationController.WorkerTag.GENERATION: rollout_worker},
-    )
-
-    # Create ScaffoldingWorkflow
-    workflow = ScaffoldingWorkflow(scaffolding_llm)
-    ```
+    reward_fn : Callable | str
+        The reward function, or an importable string path.
+    gconfig : GenerationHyperparameters
+        Generation hyperparameters.
+    tokenizer : PreTrainedTokenizerFast | str
+        Tokenizer or path to load it.
+    enable_thinking : bool
+        Whether to enable thinking tokens.
     """
 
-    def __init__(self, scaffolding_llm: ScaffoldingLlm):
-        """Initialize the ScaffoldingWorkflow.
+    def __init__(
+        self,
+        reward_fn: Callable[..., Any] | str,
+        gconfig: GenerationHyperparameters,
+        tokenizer: PreTrainedTokenizerFast | str,
+        enable_thinking: bool = False,
+    ):
+        self.reward_fn = reward_fn
+        self.tokenizer = tokenizer
+        if isinstance(self.tokenizer, str):
+            from areal.utils.hf_utils import load_hf_tokenizer
 
-        Parameters
-        ----------
-        scaffolding_llm : ScaffoldingLlm
-            The configured ScaffoldingLlm instance for inference and rewards.
-        """
-        self.scaffolding_llm = scaffolding_llm
+            self.tokenizer = load_hf_tokenizer(self.tokenizer)
+        self.gconfig = gconfig.new_with_stop_and_pad_token_ids(self.tokenizer)
+        self.enable_thinking = enable_thinking
+
+        if not isinstance(reward_fn, str):
+            self.async_reward_fn = AsyncRewardWrapper(reward_fn)
+
+    @trace_session("reward")
+    async def _compute_rewards(
+        self,
+        resp: ModelResponse,
+        prompt_str: str,
+        task_data: dict[str, Any],
+    ) -> float:
+        """Compute reward using the scaffolding reward function."""
+        completions_str = self.tokenizer.decode(resp.output_tokens)
+        reward = await self.async_reward_fn(
+            prompt_str,
+            completions_str,
+            resp.input_tokens,
+            resp.output_tokens,
+            **task_data,
+        )
+        return reward
+
+    @session_context()
+    async def _collect_samples(
+        self,
+        engine: InferenceEngine,
+        req: ModelRequest,
+        prompt_str: str,
+        task_data: dict[str, Any],
+    ) -> tuple[ModelResponse, float]:
+        """Generate one sample and compute its reward."""
+        async with atrace_session_phase("generate"):
+            resp = await engine.agenerate(req)
+
+        reward = await self._compute_rewards(resp, prompt_str, task_data)
+        stats_tracker.get(workflow_context.stat_scope()).scalar(reward=reward)
+
+        return resp, reward
 
     async def arun_episode(
-        self,
-        engine: InferenceEngine,  # noqa: ARG002 - Not used, using self.scaffolding_llm instead
-        data: dict[str, Any],
-    ) -> dict[str, InteractionWithTokenLogpReward]:
-        """Run a single episode using the scaffolding framework.
-
-        This method uses self.scaffolding_llm for inference and reward
-        computation instead of the provided engine parameter. The scaffolding
-        framework handles the full RLVR pipeline internally.
+        self, engine: InferenceEngine, data: dict[str, Any]
+    ) -> dict[str, torch.Tensor]:
+        """Run a single episode using engine generation + scaffolding reward.
 
         Parameters
         ----------
         engine : InferenceEngine
-            The inference engine (not used - scaffolding_llm handles inference).
+            The inference engine for generating responses.
         data : dict[str, Any]
-            Input data for the workflow episode, typically containing:
-            - "messages": The chat messages/prompt
-            - "answer": The ground truth answer for reward computation
-            - Other task-specific fields
+            Input data containing messages and ground truth.
 
         Returns
         -------
-        dict[str, InteractionWithTokenLogpReward]
-            Dictionary mapping interaction IDs to their completion results
-            including token IDs, log probabilities, and rewards.
+        dict[str, torch.Tensor]
+            Trajectory tensors for PPO training.
         """
-        # Extract prompt from data
-        # The data format follows AReaL's dataset conventions
-        prompt = self._extract_prompt(data)
+        # Lazy-resolve string reward_fn
+        if isinstance(self.reward_fn, str):
+            self.reward_fn = import_from_string(self.reward_fn)
+            self.async_reward_fn = AsyncRewardWrapper(self.reward_fn)
 
-        # Run the scaffolding pipeline
-        # The scaffolding_llm.generate() returns a ScaffoldingResult
-        # The PipelineTrajectoryMaker controller produces InteractionWithTokenLogpReward
-        result = await self._run_scaffolding_inference(prompt, data)
+        # Tokenize prompt
+        input_ids = self.tokenizer.apply_chat_template(
+            data["messages"],
+            tokenize=True,
+            add_generation_prompt=True,
+            enable_thinking=self.enable_thinking,
+        )
+        input_ids = list(input_ids)
 
-        return result
+        req = ModelRequest(
+            rid=uuid.uuid4().hex,
+            input_ids=input_ids,
+            gconfig=self.gconfig.new(n_samples=1),
+            tokenizer=self.tokenizer,
+        )
+        prompt_str = self.tokenizer.decode(input_ids)
 
-    def _extract_prompt(self, data: dict[str, Any]) -> str:
-        """Extract the prompt string from input data.
+        # Generate + compute reward
+        resp, reward = await self._collect_samples(engine, req, prompt_str, data)
 
-        Parameters
-        ----------
-        data : dict[str, Any]
-            Input data containing messages or prompt.
+        # Build result tensor dict
+        seq = resp.input_tokens + resp.output_tokens
+        logprobs = [0.0] * resp.input_len + resp.output_logprobs
+        loss_mask = [0] * resp.input_len + [1] * resp.output_len
+        versions = [-1] * resp.input_len + resp.output_versions
 
-        Returns
-        -------
-        str
-            The extracted prompt string.
-        """
-        # Handle different data formats
-        if "messages" in data:
-            # Chat format - messages will be processed by the scaffolding pipeline
-            # Return raw data for scaffolding to handle
-            return data
-        elif "prompt" in data:
-            return data["prompt"]
-        else:
-            raise ValueError(
-                f"Data must contain 'messages' or 'prompt' key. Got keys: {data.keys()}"
-            )
-
-    async def _run_scaffolding_inference(
-        self,
-        prompt: str | dict[str, Any],
-        data: dict[str, Any],
-    ) -> dict[str, InteractionWithTokenLogpReward]:
-        """Run inference through the scaffolding pipeline asynchronously.
-
-        Uses the async interface of ScaffoldingLlm (generate_async) to run
-        inference without blocking. The ScaffoldingResult supports async
-        iteration and can be awaited directly.
-
-        Parameters
-        ----------
-        prompt : str | dict[str, Any]
-            The prompt string or data dict for generation.
-        data : dict[str, Any]
-            Full input data including ground truth for reward computation.
-
-        Returns
-        -------
-        dict[str, InteractionWithTokenLogpReward]
-            Dictionary of interaction results with rewards.
-
-        See Also
-        --------
-        TensorRT-LLM examples/scaffolding/run_basic_generation.py : test_async function
-        """
-        # Use the async interface of ScaffoldingLlm
-        # generate_async returns a ScaffoldingResult that supports:
-        # 1. async iteration: async for result in llm.generate_async(prompt)
-        # 2. direct await: await llm.generate_async(prompt)
-        #
-        # We await the result directly to get the final output
-        # The ScaffoldingResult.__await__ calls aresult() which waits until done
-        scaffolding_result = await self.scaffolding_llm.generate_async(prompt)
-
-        # The result from PipelineTrajectoryMaker is already in the expected format
-        # dict[str, InteractionWithTokenLogpReward]
-        # Access the trajectory data from the scaffolding result
-        return scaffolding_result
-
-    def shutdown(self):
-        """Shutdown the scaffolding LLM and release resources."""
-        if self.scaffolding_llm is not None:
-            self.scaffolding_llm.shutdown()
+        res = {
+            "input_ids": torch.tensor(seq, dtype=torch.int32),
+            "loss_mask": torch.tensor(loss_mask, dtype=torch.int32),
+            "logprobs": torch.tensor(logprobs, dtype=torch.float32),
+            "versions": torch.tensor(versions, dtype=torch.int32),
+            "attention_mask": torch.ones(len(seq), dtype=torch.bool),
+            "rewards": torch.tensor(reward, dtype=torch.float32),
+        }
+        return {k: v.unsqueeze(0) for k, v in res.items()}
