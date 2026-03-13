@@ -7,9 +7,10 @@ tool-calling loop (search + visit) expressed as a scaffolding
 ``Controller``, while ``TraceTrajectoryMaker`` traces each LLM call
 for PPO training.
 
-The example uses **fake tools** (no SERPER_KEY / JINA_API_KEYS needed)
-and an LLM judge for reward computation (the same inference engine is
-used for both agent generation and judging).
+The example uses real web search (via Serper API, requires SERPER_KEY_ID
+env var) and basic HTTP fetching for page visits.  An LLM judge is used
+for reward computation (the same inference engine is used for both agent
+generation and judging).
 
 Usage:
     python examples/scaffolding/search_scaffolding.py \\

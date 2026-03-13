@@ -27,7 +27,7 @@ from areal.experimental.scaffolding._compat import (
 )
 from areal.utils import logging
 
-from .fake_tools import fake_search, fake_visit
+from .real_tools import real_search, real_visit
 
 logger = logging.getLogger("SearchAgentController")
 
@@ -104,18 +104,18 @@ class SearchAgentController(Controller):
         return len(self.tokenizer.encode("".join(parts)))
 
     async def _execute_tool(self, tool_name: str, tool_args: dict) -> str:
-        """Dispatch a tool call to the appropriate fake tool."""
+        """Dispatch a tool call to the appropriate tool."""
         if tool_name == "search":
             queries = tool_args.get("query", [])
             if isinstance(queries, str):
                 queries = [queries]
-            return await fake_search(queries)
+            return await real_search(queries)
         if tool_name == "visit":
             urls = tool_args.get("url", [])
             if isinstance(urls, str):
                 urls = [urls]
             goal = tool_args.get("goal", "")
-            return await fake_visit(urls, goal)
+            return await real_visit(urls, goal)
         return f"Error: Tool {tool_name} not found"
 
     # ------------------------------------------------------------------
