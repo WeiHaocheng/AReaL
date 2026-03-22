@@ -101,7 +101,7 @@ class ScaffoldingWorkflow(RolloutWorkflow):
         )
 
         self.scaffolding_llm = self.build_scaffolding_llm(engine)
-        logger.info(f"Initialized scaffolding components with server at {addr}")
+        logger.info("Initialized scaffolding components with server at %s", addr)
 
     def build_scaffolding_llm(self, engine: InferenceEngine) -> ScaffoldingLlm:
         """Build the ScaffoldingLlm instance.
@@ -188,15 +188,14 @@ class ScaffoldingWorkflow(RolloutWorkflow):
         )
         prompt_str = self.tokenizer.decode(input_ids)
 
-        # Pass per-episode data as kwargs so generate_async captures them
-        # in the synchronous clone, avoiding race conditions when multiple
-        # arun_episode coroutines run concurrently.
-        result = self.scaffolding_llm.generate_async(
-            prompt_str,
-            task_data=data,
-            prompt_str=prompt_str,
-            input_tokens=input_ids,
-        )
+        # Configure per-episode data on trajectory maker
+        # (clone() in scaffolding_llm will deep-copy these)
+        self.trajectory_maker.task_data = data
+        self.trajectory_maker.prompt_str = prompt_str
+        self.trajectory_maker.input_tokens = input_ids
+
+        # Run full pipeline via scaffolding_llm
+        result = self.scaffolding_llm.generate_async(prompt_str)
         await result
 
         # Extract interaction and convert to tensor dict
