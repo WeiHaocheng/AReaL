@@ -6,9 +6,9 @@ AReaL for reinforcement learning training.
 ## Overview
 
 The scaffolding framework provides a modular and extensible way to compose
-inference-time compute methods with RL training. It decouples the inference logic
+various methods with RL training. It decouples the inference logic
 (Controllers) from the execution backend (Workers), enabling flexible composition of
-different methods.
+different methods. With Scaffolding, we can flexibly compose various rollout, reward, and trajectory tracing methods.
 
 ### Key Components
 
