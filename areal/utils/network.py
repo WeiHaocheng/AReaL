@@ -6,11 +6,26 @@ def gethostname():
     return socket.gethostname()
 
 
+def is_ipv6_address(ip: str) -> bool:
+    """Return True if *ip* is an IPv6 address string."""
+    try:
+        socket.inet_pton(socket.AF_INET6, ip)
+        return True
+    except OSError:
+        return False
+
+
+def format_addr(host: str, port: int) -> str:
+    """Format host:port, wrapping IPv6 addresses in brackets as required by URLs."""
+    if is_ipv6_address(host):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
 def gethostip(probe_host: str = "8.8.8.8", probe_port: int = 80) -> str:
     """
-    Find the local IPv4 address for outbound route to `probe_host:probe_port` (typically
-    a LAN/private IP). Use hostname resolution first; if it fails or returns loopback (127.*),
-    fall back to a UDP connect.
+    Find the local IP address for outbound traffic. Tries IPv4 first, then falls back
+    to IPv6 for IPv6-only environments.
 
     Args:
         probe_host: Remote IPv4 address used to trigger route selection, default to Google
@@ -18,10 +33,10 @@ def gethostip(probe_host: str = "8.8.8.8", probe_port: int = 80) -> str:
         probe_port: Remote port used for the UDP probe.
 
     Returns:
-        The selected local IPv4 address as a string
+        The selected local IP address as a string (IPv4 or IPv6)
 
     Raises:
-        RuntimeError: If no suitable IPv4 address can be determined
+        RuntimeError: If no suitable IP address can be determined
     """
     try:
         ip = socket.gethostbyname(socket.gethostname())
@@ -33,6 +48,23 @@ def gethostip(probe_host: str = "8.8.8.8", probe_port: int = 80) -> str:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.connect((probe_host, probe_port))
+            return sock.getsockname()[0]
+    except OSError:
+        pass
+
+    # IPv6 fallback for IPv6-only environments
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET6)
+        for info in infos:
+            ip = info[4][0]
+            if ip and not ip.startswith("::1"):
+                return ip
+    except socket.gaierror:
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as sock:
+            sock.connect(("2001:4860:4860::8888", 80))
             return sock.getsockname()[0]
     except OSError as e:
         raise RuntimeError("Could not determine host IP") from e
