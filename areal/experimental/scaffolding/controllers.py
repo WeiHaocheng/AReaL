@@ -6,6 +6,7 @@ Rewards) that integrate with the scaffolding framework.
 
 Key Components:
 - RLVRRewardController: Controller that processes reward computation
+- LLMJudgeController: Controller that uses an LLM to judge answer correctness
 - PipelineTrajectoryMaker: Controller that composes generation and reward pipelines
 - MultiTurnChatController: Controller for multi-turn chat with reflection
 - ChatTracer: TaskCollection for tracing multi-turn chat conversations
@@ -14,6 +15,9 @@ Key Components:
 
 from __future__ import annotations
 
+import ast
+import json
+import re
 from collections.abc import Callable
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -25,6 +29,7 @@ from areal.experimental.scaffolding._compat import (
     ChatTask,
     Controller,
     GenerationTask,
+    NativeGenerationController,
     RoleMessage,
     Task,
     TaskCollection,
@@ -829,3 +834,249 @@ class TraceTrajectoryMaker(Controller):
         yield from self.process([task], **kwargs)
 
         return task.create_scaffolding_output()
+
+
+def _parse_judge_result(raw_response: str) -> float:
+    """Parse the LLM judge response and extract a binary reward.
+
+    The judge is expected to return a JSON block with a ``"judgement"`` field
+    set to ``"correct"`` or ``"incorrect"``.
+
+    Parameters
+    ----------
+    raw_response : str
+        Raw text response from the judge LLM.
+
+    Returns
+    -------
+    float
+        1.0 if the judgement is ``"correct"``, 0.0 otherwise.
+    """
+    mbe = None
+    for parse_fn in [json.loads, ast.literal_eval]:
+        try:
+            mbe = parse_fn(raw_response.split("```json")[-1].split("```")[0].strip())
+            break
+        except Exception:
+            pass
+    if mbe is None and '"judgement": "incorrect"' in raw_response:
+        mbe = {"judgement": "incorrect"}
+    if mbe is None and '"judgement": "correct"' in raw_response:
+        mbe = {"judgement": "correct"}
+    if mbe is None:
+        logger.warning("Unknown judge result. Raw response: %s", raw_response)
+        mbe = {"judgement": "unknown"}
+    return float("judgement" in mbe and mbe["judgement"] == "correct")
+
+
+_JUDGE_PROMPT_TEMPLATE = (
+    "You are an evaluation assistant. Please determine if the predicted answer "
+    "is equivalent to the labeled answer.\n"
+    "You should first give your rationale for the judgement, and then give your "
+    "judgement result (i.e., correct or incorrect).\n\n"
+    "\n"
+    "question: {question}\n"
+    "ground truth answers: {gt_answer}\n"
+    "pred_answer: {pred_answer}\n\n"
+    "Did the model give an answer **equivalent** to the labeled answer? \n\n"
+    "The output should in the following json format:\n"
+    "```json\n"
+    "{{\n"
+    '    "rationale": "your rationale for the judgement, as a text",\n'
+    "    \"judgement\": \"your judgement result, can only be 'correct' or 'incorrect'\n"
+    "}}\n"
+    "```\n"
+    "Your output:"
+)
+
+
+class LLMJudgeController(Controller):
+    """Controller that uses an LLM to judge answer correctness.
+
+    Instead of using a deterministic reward function, this controller sends
+    a judge prompt to the same (or a separate) LLM worker and parses the
+    response to determine whether the predicted answer is correct.
+
+    This is the scaffolding-framework equivalent of
+    ``MultiTurnReactAgent.calc_reward_with_llm_judge`` from the
+    tongyi_deepresearch example.
+
+    Parameters
+    ----------
+    judge_prompt_template : str, optional
+        The prompt template for the judge.  Must contain ``{question}``,
+        ``{gt_answer}``, and ``{pred_answer}`` placeholders.
+    max_pred_chars : int
+        Maximum characters of the predicted answer to include in the
+        judge prompt (to avoid exceeding context limits).
+    max_judge_tokens : int
+        Maximum tokens for the judge LLM response.
+    """
+
+    class WorkerTag(Enum):
+        JUDGE = "llm_judge"
+
+    def __init__(
+        self,
+        judge_prompt_template: str | None = None,
+        max_pred_chars: int = 200,
+        max_judge_tokens: int = 8192,
+    ):
+        super().__init__()
+        self.judge_prompt_template = judge_prompt_template or _JUDGE_PROMPT_TEMPLATE
+        self.max_pred_chars = max_pred_chars
+        self.max_judge_tokens = max_judge_tokens
+        self.scores: list[float] | None = None
+        # Per-episode data set before generate(); deep-copied via clone()
+        self.task_data: dict[str, Any] = {}
+
+    def _build_judge_prompt(
+        self,
+        question: str,
+        ground_truth: str,
+        prediction: str,
+    ) -> str:
+        """Format the judge prompt with the given data.
+
+        Parameters
+        ----------
+        question : str
+            The original question.
+        ground_truth : str
+            The ground-truth answer.
+        prediction : str
+            The model's predicted answer (truncated to ``max_pred_chars``).
+
+        Returns
+        -------
+        str
+            The formatted judge prompt.
+        """
+        return self.judge_prompt_template.format(
+            question=question,
+            gt_answer=ground_truth,
+            pred_answer=prediction[: self.max_pred_chars],
+        )
+
+    def _extract_answer_and_data(self, task: Task) -> tuple[str, str, str] | None:
+        """Extract (question, ground_truth, prediction) from a task.
+
+        Supports ``RLVRRewardTask``, ``ChatRewardTask``, and
+        ``GenerationTask`` with ``customized_result_fields``.
+
+        For ``ChatRewardTask``, falls back to ``self.task_data`` for
+        question/answer and extracts the prediction from the last
+        assistant message in the traced interaction.
+
+        Returns ``None`` if the task type is not recognised.
+        """
+        if isinstance(task, RLVRRewardTask):
+            question = task.task_data.get("question", "")
+            gt = task.task_data.get("answer", "")
+            if isinstance(gt, list):
+                gt = str(gt[0]) if gt else ""
+            # Extract from <answer> tags if present, else use full completion
+            match = re.search(r"<answer>(.*?)</answer>", task.completion_str, re.DOTALL)
+            pred = match.group(1).strip() if match else task.completion_str
+            return question, str(gt), pred
+
+        if isinstance(task, ChatRewardTask):
+            # Use per-episode task_data for question/answer
+            question = self.task_data.get("question", "")
+            gt = self.task_data.get("answer", "")
+            if isinstance(gt, list):
+                gt = str(gt[0]) if gt else ""
+            # Extract prediction from the interaction's completion
+            pred = ""
+            if task.interaction is not None:
+                completion = getattr(task.interaction, "completion", None)
+                if completion is not None:
+                    pred = completion.choices[0].message.content or ""
+                # Extract from <answer> tags if present
+                match = re.search(r"<answer>(.*?)</answer>", pred, re.DOTALL)
+                if match:
+                    pred = match.group(1).strip()
+            return question, str(gt), pred
+
+        if isinstance(task, GenerationTask):
+            data = task.customized_result_fields
+            question = data.get("question", "")
+            gt = data.get("answer", "")
+            if isinstance(gt, list):
+                gt = str(gt[0]) if gt else ""
+            pred = task.output_str or ""
+            return question, str(gt), pred
+
+        return None
+
+    def process(self, tasks: list[Task], **kwargs) -> Any:
+        """Process tasks by sending judge prompts to the LLM worker.
+
+        For each task, builds a judge prompt and yields a ``ChatTask`` to
+        the worker.  After the worker responds, parses the judge result
+        and stores the reward.
+
+        Parameters
+        ----------
+        tasks : list[Task]
+            Tasks to compute rewards for.
+        **kwargs
+            Additional keyword arguments.
+
+        Yields
+        ------
+        list[Task]
+            ChatTask lists sent to the worker for judge LLM calls.
+        """
+        self.scores = []
+
+        # Build judge ChatTasks for each input task
+        # judge_map: input task index -> index in judge_chat_tasks list
+        judge_chat_tasks: list[ChatTask] = []
+        judge_map: dict[int, int] = {}
+
+        for i, task in enumerate(tasks):
+            extracted = self._extract_answer_and_data(task)
+            if extracted is None:
+                continue
+            question, gt, pred = extracted
+            if not question and not gt:
+                continue
+
+            judge_prompt = self._build_judge_prompt(question, gt, pred)
+            judge_messages = [
+                RoleMessage.from_dict({"role": "user", "content": judge_prompt})
+            ]
+            chat_task = ChatTask.create_from_messages(judge_messages)
+            chat_task.worker_tag = NativeGenerationController.WorkerTag.GENERATION
+            chat_task.max_tokens = self.max_judge_tokens
+            chat_task.temperature = 1.0
+            chat_task.stop = None
+            judge_map[i] = len(judge_chat_tasks)
+            judge_chat_tasks.append(chat_task)
+
+        # Yield all judge tasks to the worker in one batch
+        if judge_chat_tasks:
+            yield judge_chat_tasks
+
+        # Parse responses and assign rewards
+        for i, task in enumerate(tasks):
+            reward = 0.0
+            if i in judge_map:
+                jt = judge_chat_tasks[judge_map[i]]
+                # The worker appends an AssistantMessage after the user message
+                if jt.messages and len(jt.messages) > 1:
+                    judge_response = jt.messages[-1].content or ""
+                else:
+                    judge_response = ""
+                reward = _parse_judge_result(judge_response)
+
+            # Store reward on the original task
+            if isinstance(task, (RLVRRewardTask, ChatRewardTask)):
+                task.reward = reward
+                if task.interaction is not None:
+                    task.interaction.reward = reward
+            elif isinstance(task, GenerationTask):
+                task.customized_result_fields["reward"] = reward
+
+            self.scores.append(reward)
