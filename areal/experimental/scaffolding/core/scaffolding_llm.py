@@ -178,6 +178,7 @@ class ScaffoldingLlm:
             try:
                 request = ScaffoldingRequest(
                     prompt=prompt,
+                    kwargs={},
                     result=result,
                     controller=cloned_controller,
                 )
