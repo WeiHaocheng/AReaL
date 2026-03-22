@@ -114,7 +114,7 @@ class SGLangWorker(OpenaiWorker):
             return TaskStatus.SUCCESS
 
         except Exception as e:
-            print(f"SGLang chat client exception: {e}")
+            worker_logger.error("SGLang chat client exception: %s", e)
             return TaskStatus.WORKER_EXECEPTION
 
     async def generation_handler(self, task: GenerationTask) -> TaskStatus:
@@ -155,7 +155,7 @@ class SGLangWorker(OpenaiWorker):
             return TaskStatus.SUCCESS
 
         except Exception as e:
-            print(f"SGLang completion client exception: {e}")
+            worker_logger.error("SGLang completion client exception: %s", e)
             return TaskStatus.WORKER_EXECEPTION
 
     # Register task handlers
