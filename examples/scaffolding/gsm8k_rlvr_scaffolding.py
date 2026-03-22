@@ -17,12 +17,7 @@ from areal.api.cli_args import GRPOConfig, load_expr_config
 from areal.api.engine_api import InferenceEngine
 from areal.dataset import get_custom_dataset
 from areal.experimental.scaffolding._compat import (
-    NativeGenerationController,
     ScaffoldingLlm,
-)
-from areal.experimental.scaffolding.controllers import (
-    PipelineTrajectoryMaker,
-    RLVRRewardController,
 )
 from areal.experimental.scaffolding.workflow import ScaffoldingWorkflow
 from areal.trainer import PPOTrainer

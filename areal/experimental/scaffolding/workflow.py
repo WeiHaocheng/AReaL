@@ -209,9 +209,7 @@ class ScaffoldingWorkflow(RolloutWorkflow):
         resp = interaction.model_response
         if resp is not None and not resp.output_tokens:
             output_text = scaffolding_output.text or ""
-            output_tokens = self.tokenizer.encode(
-                output_text, add_special_tokens=False
-            )
+            output_tokens = self.tokenizer.encode(output_text, add_special_tokens=False)
             resp.output_tokens = output_tokens
             resp.output_logprobs = [0.0] * len(output_tokens)
             resp.output_versions = [-1] * len(output_tokens)

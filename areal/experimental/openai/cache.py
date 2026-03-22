@@ -24,7 +24,6 @@ class InteractionCache(OrderedDict[str, InteractionWithTokenLogpReward]):
         should start with an empty cache, so we simply return a new
         instance.
         """
-        import copy
 
         new = InteractionCache()
         memo[id(self)] = new
