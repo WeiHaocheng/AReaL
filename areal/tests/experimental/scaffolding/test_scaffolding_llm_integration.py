@@ -984,7 +984,9 @@ class TestPerTaskScaffoldingLlm:
         num_tasks = 10
         try:
             for i in range(num_tasks):
-                runner.submit(simulate_arun_episode_per_instance, i, task_id=i)
+                runner.submit(
+                    simulate_arun_episode_per_instance, i, task_id=i
+                )
 
             results = runner.wait(count=num_tasks, timeout=30.0)
 
@@ -1008,7 +1010,9 @@ class TestPerTaskScaffoldingLlm:
         llm_instances = []
 
         async def simulate_arun_episode_per_instance(episode_idx: int) -> dict:
-            gen_ctrl = NativeGenerationController(sampling_params={"max_tokens": 50})
+            gen_ctrl = NativeGenerationController(
+                sampling_params={"max_tokens": 50}
+            )
             reward_ctrl = RLVRRewardController(_simple_reward_fn)
             multi_turn_ctrl = MultiTurnChatController(
                 generation_controller=gen_ctrl,
@@ -1039,7 +1043,9 @@ class TestPerTaskScaffoldingLlm:
         num_tasks = 50
         try:
             for i in range(num_tasks):
-                runner.submit(simulate_arun_episode_per_instance, i, task_id=i)
+                runner.submit(
+                    simulate_arun_episode_per_instance, i, task_id=i
+                )
 
             results = runner.wait(count=num_tasks, timeout=60.0)
 
