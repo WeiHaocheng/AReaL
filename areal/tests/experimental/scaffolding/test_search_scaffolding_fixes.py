@@ -202,6 +202,30 @@ async def test_search_workflow_returns_full_trace_results():
     assert result == trace_results
 
 
+def test_search_workflow_backfills_missing_trace_output_tokens():
+    workflow = SearchScaffoldingWorkflow(
+        reward_fn=lambda *args, **kwargs: 1.0,
+        gconfig=_FakeGConfig(max_new_tokens=128, temperature=0.7),
+        tokenizer=_FakeTokenizer(),
+    )
+    interaction = InteractionWithTokenLogpReward(
+        model_response=SimpleNamespace(
+            output_tokens=[],
+            output_logprobs=[],
+            output_versions=[],
+        ),
+        completion=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hello"))]
+        ),
+    )
+
+    result = workflow._ensure_trace_tokens({"turn": interaction})
+
+    assert result["turn"].model_response.output_tokens == [104, 101, 108, 108, 111]
+    assert result["turn"].model_response.output_logprobs == [0.0] * 5
+    assert result["turn"].model_response.output_versions == [-1] * 5
+
+
 def test_trace_trajectory_maker_uses_instance_task_collection():
     first = TraceTrajectoryMaker(MagicMock(), MagicMock())
     second = TraceTrajectoryMaker(MagicMock(), MagicMock())
