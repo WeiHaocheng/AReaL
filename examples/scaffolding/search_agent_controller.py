@@ -14,6 +14,7 @@ only LLM generation goes through a Worker.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import json5
@@ -119,6 +120,14 @@ class SearchAgentController(Controller):
             return await real_visit(urls, goal)
         return f"Error: Tool {tool_name} not found"
 
+    def _execute_tool_sync(self, tool_name: str, tool_args: dict) -> str:
+        """Execute the async tool call without nesting event loops."""
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                asyncio.run, self._execute_tool(tool_name, tool_args)
+            )
+            return future.result()
+
     # ------------------------------------------------------------------
     # Controller interface
     # ------------------------------------------------------------------
@@ -197,13 +206,7 @@ class SearchAgentController(Controller):
                     tool_name = tool_call["name"]
                     tool_args = tool_call.get("arguments", {})
                     # Execute tool (async → sync bridge)
-                    loop = asyncio.new_event_loop()
-                    try:
-                        result = loop.run_until_complete(
-                            self._execute_tool(tool_name, tool_args)
-                        )
-                    finally:
-                        loop.close()
+                    result = self._execute_tool_sync(tool_name, tool_args)
                 except Exception as e:
                     result = (
                         f"Error: {e} Tool call must be valid JSON with "

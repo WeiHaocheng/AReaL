@@ -23,7 +23,6 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-import torch
 from transformers import PreTrainedTokenizerFast
 
 from areal.api.cli_args import GenerationHyperparameters, GRPOConfig, load_expr_config
@@ -186,7 +185,7 @@ class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
 
     async def arun_episode(
         self, engine: InferenceEngine, data: dict[str, Any]
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Any]:
         """Run a single search-agent episode.
 
         Parameters
@@ -198,8 +197,8 @@ class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Trajectory tensors for PPO training.
+        dict[str, Any]
+            Full traced interactions for PPO training.
         """
         if self.worker is None:
             self._lazy_init_scaffolding(engine)
@@ -238,37 +237,10 @@ class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
         scaffolding_output = result.outputs[0]
         trace_results = scaffolding_output.data
 
-        # Get the final output text from the last traced interaction
         if trace_results:
-            last_interaction = list(trace_results.values())[-1]
-            output_str = ""
-            if last_interaction.completion is not None:
-                output_str = (
-                    last_interaction.completion.choices[0].message.content or ""
-                )
-            # Reward is set by LLMJudgeController via TraceTrajectoryMaker
-            reward = float(last_interaction.reward or 0.0)
-        else:
-            output_str = scaffolding_output.text or ""
-            reward = 0.0
+            return trace_results
 
-        output_tokens = self.tokenizer.encode(output_str, add_special_tokens=False)
-
-        # Build tensor dict for PPO training
-        seq = input_ids + output_tokens
-        logprobs = [0.0] * len(seq)
-        loss_mask = [0] * len(input_ids) + [1] * len(output_tokens)
-        versions = [-1] * len(seq)
-
-        res = {
-            "input_ids": torch.tensor(seq, dtype=torch.int32),
-            "loss_mask": torch.tensor(loss_mask, dtype=torch.int32),
-            "logprobs": torch.tensor(logprobs, dtype=torch.float32),
-            "versions": torch.tensor(versions, dtype=torch.int32),
-            "attention_mask": torch.ones(len(seq), dtype=torch.bool),
-            "rewards": torch.tensor(reward, dtype=torch.float32),
-        }
-        return {k: v.unsqueeze(0) for k, v in res.items()}
+        return {}
 
 
 # ----------------------------------------------------------------------

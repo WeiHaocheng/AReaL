@@ -95,6 +95,11 @@ class SGLangWorker(OpenaiWorker):
                 response.choices[0].message, "reasoning_content", None
             )
             tool_calls = response.choices[0].message.tool_calls
+            token_ids = getattr(response.choices[0].message, "token_ids", None)
+            if token_ids is not None:
+                task.output_tokens = list(token_ids)
+            elif hasattr(response.choices[0], "token_ids"):
+                task.output_tokens = list(response.choices[0].token_ids)
 
             task.messages.append(
                 AssistantMessage(content, reasoning, reasoning_content, tool_calls)
