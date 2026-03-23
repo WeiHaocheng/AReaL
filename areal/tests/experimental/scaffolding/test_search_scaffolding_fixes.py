@@ -16,7 +16,12 @@ from areal.experimental.scaffolding._compat import (
 from areal.experimental.scaffolding.controllers import TraceTrajectoryMaker
 from areal.experimental.scaffolding.worker import SGLangWorker
 from examples.scaffolding.search_agent_controller import SearchAgentController
-from examples.scaffolding.search_scaffolding import SearchScaffoldingWorkflow
+from examples.scaffolding.search_scaffolding import (
+    SearchScaffoldingWorkflow,
+    _bounded_completion_tokens,
+    _bounded_judge_tokens,
+    _resolve_context_length,
+)
 
 
 class _FakeTokenizer:
@@ -65,6 +70,15 @@ class _AwaitableResult:
             return self
 
         return _done().__await__()
+
+
+class _FakeGConfig:
+    def __init__(self, max_new_tokens: int, temperature: float):
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+
+    def new_with_stop_and_pad_token_ids(self, tokenizer):
+        return self
 
 
 @pytest.mark.asyncio
@@ -173,3 +187,28 @@ def test_trace_trajectory_maker_uses_instance_task_collection():
     second = TraceTrajectoryMaker(MagicMock(), MagicMock())
 
     assert first.task_collections["chat_tracer"] is not second.task_collections["chat_tracer"]
+
+
+def test_search_workflow_bounds_completion_budget_to_context_window():
+    workflow = SearchScaffoldingWorkflow(
+        reward_fn=lambda *args, **kwargs: 1.0,
+        gconfig=_FakeGConfig(max_new_tokens=2048, temperature=0.7),
+        tokenizer=_FakeTokenizer(),
+        max_total_tokens=2048,
+    )
+    workflow.worker = MagicMock()
+
+    workflow.build_scaffolding_llm(engine=MagicMock())
+
+    assert workflow.gen_controller.sampling_params["max_tokens"] == 512
+
+
+def test_search_scaffolding_budget_helpers_follow_context_length():
+    config = SimpleNamespace(
+        sglang=SimpleNamespace(context_length=2048),
+        vllm=SimpleNamespace(max_model_len=8192),
+    )
+
+    assert _resolve_context_length(config) == 2048
+    assert _bounded_completion_tokens(2048, 4096) == 512
+    assert _bounded_judge_tokens(2048) == 512

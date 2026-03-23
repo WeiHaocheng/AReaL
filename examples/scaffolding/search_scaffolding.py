@@ -82,6 +82,25 @@ SYSTEM_PROMPT = (
 )
 
 
+def _resolve_context_length(config: GRPOConfig) -> int:
+    """Pick the active inference context window from config."""
+    if getattr(config, "sglang", None) and config.sglang.context_length is not None:
+        return config.sglang.context_length
+    if getattr(config, "vllm", None) and config.vllm.max_model_len is not None:
+        return config.vllm.max_model_len
+    return 8192
+
+
+def _bounded_completion_tokens(max_total_tokens: int, requested_max_tokens: int) -> int:
+    """Keep per-request completion length well within the context budget."""
+    return max(128, min(requested_max_tokens, max_total_tokens // 4))
+
+
+def _bounded_judge_tokens(max_total_tokens: int) -> int:
+    """Reserve a smaller budget for judge calls to avoid context overflows."""
+    return max(128, min(512, max_total_tokens // 4))
+
+
 class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
     """ScaffoldingWorkflow for multi-turn search-agent RL training.
 
@@ -148,9 +167,12 @@ class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
         -------
         ScaffoldingLlm
         """
+        max_completion_tokens = _bounded_completion_tokens(
+            self.max_total_tokens, self.gconfig.max_new_tokens
+        )
         stop_strings = ["\n<tool_response>", "<tool_response>"]
         sampling_params: dict[str, Any] = {
-            "max_tokens": self.gconfig.max_new_tokens,
+            "max_tokens": max_completion_tokens,
             "temperature": self.gconfig.temperature or 1.0,
             "stop": stop_strings,
         }
@@ -252,6 +274,8 @@ def main(args):
     """Main entry point for search scaffolding training."""
     config, _ = load_expr_config(args, GRPOConfig)
     tokenizer = load_hf_tokenizer(config.tokenizer_path)
+    max_total_tokens = _resolve_context_length(config)
+    max_judge_tokens = _bounded_judge_tokens(max_total_tokens)
 
     train_dataset = get_custom_dataset(
         split="train",
@@ -270,8 +294,8 @@ def main(args):
         tokenizer=config.tokenizer_path,
         enable_thinking=False,
         max_turns=10,
-        max_total_tokens=8192,
-        max_judge_tokens=2048,
+        max_total_tokens=max_total_tokens,
+        max_judge_tokens=max_judge_tokens,
     )
     eval_workflow_kwargs = workflow_kwargs.copy()
     eval_workflow_kwargs["gconfig"] = config.gconfig.new(temperature=0.6)
