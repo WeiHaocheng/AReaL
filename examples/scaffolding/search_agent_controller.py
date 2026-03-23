@@ -160,12 +160,16 @@ class SearchAgentController(Controller):
             # Reserve room for max_new_tokens so the request won't exceed
             # the SGLang context window.
             max_new = self.generation_controller.sampling_params.get("max_tokens", 2048)
-            if token_count + max_new > self.max_total_tokens:
+            if (
+                token_count + max_new + self._token_safety_margin
+                > self.max_total_tokens
+            ):
                 logger.info(
-                    "Token budget approaching limit (%d + %d > %d); "
+                    "Token budget approaching limit (%d + %d + %d > %d); "
                     "requesting final answer.",
                     token_count,
                     max_new,
+                    self._token_safety_margin,
                     self.max_total_tokens,
                 )
                 chat_task.add_message(

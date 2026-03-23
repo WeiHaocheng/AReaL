@@ -116,6 +116,26 @@ async def test_search_agent_controller_executes_tool_calls_inside_event_loop():
     )
 
 
+def test_search_agent_controller_reserves_safety_margin_before_final_answer():
+    controller = SearchAgentController(
+        generation_controller=_FakeGenerationController(["<answer>done</answer>"]),
+        tokenizer=_FakeTokenizer(),
+        max_turns=1,
+        max_total_tokens=400,
+        messages=[{"role": "user", "content": "budget?"}],
+        input_tokens=[11, 12],
+    )
+    controller._count_tokens = MagicMock(return_value=120)
+    controller.generation_controller.sampling_params["max_tokens"] = 32
+    controller._token_safety_margin = 256
+
+    yielded = list(controller.process([]))
+
+    chat_task = yielded[0][0]
+    assert "maximum context length" in chat_task.messages[-2].content
+    assert chat_task.max_tokens == 256
+
+
 @pytest.mark.asyncio
 async def test_sglang_worker_chat_handler_populates_output_tokens():
     response = SimpleNamespace(
