@@ -17,12 +17,7 @@ from areal.api.cli_args import GRPOConfig, load_expr_config
 from areal.api.engine_api import InferenceEngine
 from areal.dataset import get_custom_dataset
 from areal.experimental.scaffolding._compat import (
-    NativeGenerationController,
     ScaffoldingLlm,
-)
-from areal.experimental.scaffolding.controllers import (
-    PipelineTrajectoryMaker,
-    RLVRRewardController,
 )
 from areal.experimental.scaffolding.workflow import ScaffoldingWorkflow
 from areal.trainer import PPOTrainer
@@ -37,15 +32,7 @@ class GSM8KScaffoldingWorkflow(ScaffoldingWorkflow):
     """
 
     def build_scaffolding_llm(self, engine: InferenceEngine) -> ScaffoldingLlm:
-        self.gen_controller = NativeGenerationController()
-        self.reward_controller = RLVRRewardController(self.reward_fn)
-        self.trajectory_maker = PipelineTrajectoryMaker(
-            self.gen_controller, self.reward_controller
-        )
-        return ScaffoldingLlm(
-            self.trajectory_maker,
-            {NativeGenerationController.WorkerTag.GENERATION: self.worker},
-        )
+        return super().build_scaffolding_llm(engine)
 
 
 def main(args):
