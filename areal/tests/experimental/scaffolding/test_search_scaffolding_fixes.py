@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from examples.scaffolding.search_agent_controller import SearchAgentController
+from examples.scaffolding.search_scaffolding import (
+    SearchScaffoldingWorkflow,
+    _bounded_completion_tokens,
+    _bounded_judge_tokens,
+    _resolve_context_length,
+)
+
 from areal.experimental.openai.types import InteractionWithTokenLogpReward
 from areal.experimental.scaffolding._compat import (
     AssistantMessage,
@@ -15,13 +23,6 @@ from areal.experimental.scaffolding._compat import (
 )
 from areal.experimental.scaffolding.controllers import TraceTrajectoryMaker
 from areal.experimental.scaffolding.worker import SGLangWorker
-from examples.scaffolding.search_agent_controller import SearchAgentController
-from examples.scaffolding.search_scaffolding import (
-    SearchScaffoldingWorkflow,
-    _bounded_completion_tokens,
-    _bounded_judge_tokens,
-    _resolve_context_length,
-)
 
 
 class _FakeTokenizer:
@@ -111,7 +112,8 @@ async def test_search_agent_controller_executes_tool_calls_inside_event_loop():
     chat_task = yielded[-1][0]
     assert isinstance(chat_task, ChatTask)
     assert any(
-        getattr(message, "content", "") == "<tool_response>\ntool result\n</tool_response>"
+        getattr(message, "content", "")
+        == "<tool_response>\ntool result\n</tool_response>"
         for message in chat_task.messages
     )
 
@@ -174,7 +176,9 @@ async def test_sglang_worker_chat_handler_populates_output_tokens():
 async def test_search_workflow_returns_full_trace_results():
     workflow = SearchScaffoldingWorkflow(
         reward_fn=lambda *args, **kwargs: 1.0,
-        gconfig=MagicMock(new_with_stop_and_pad_token_ids=lambda tokenizer: MagicMock()),
+        gconfig=MagicMock(
+            new_with_stop_and_pad_token_ids=lambda tokenizer: MagicMock()
+        ),
         tokenizer=_FakeTokenizer(),
     )
     workflow.worker = MagicMock()
@@ -230,7 +234,10 @@ def test_trace_trajectory_maker_uses_instance_task_collection():
     first = TraceTrajectoryMaker(MagicMock(), MagicMock())
     second = TraceTrajectoryMaker(MagicMock(), MagicMock())
 
-    assert first.task_collections["chat_tracer"] is not second.task_collections["chat_tracer"]
+    assert (
+        first.task_collections["chat_tracer"]
+        is not second.task_collections["chat_tracer"]
+    )
 
 
 def test_search_workflow_bounds_completion_budget_to_context_window():

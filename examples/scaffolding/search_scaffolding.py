@@ -201,9 +201,7 @@ class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
             {NativeGenerationController.WorkerTag.GENERATION: self.worker},
         )
 
-    def _ensure_trace_tokens(
-        self, trace_results: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _ensure_trace_tokens(self, trace_results: dict[str, Any]) -> dict[str, Any]:
         """Backfill output tokens for traced chat turns when the API omits them."""
         for interaction in trace_results.values():
             resp = getattr(interaction, "model_response", None)
@@ -218,9 +216,7 @@ class SearchScaffoldingWorkflow(ScaffoldingWorkflow):
             if not output_text:
                 continue
 
-            output_tokens = self.tokenizer.encode(
-                output_text, add_special_tokens=False
-            )
+            output_tokens = self.tokenizer.encode(output_text, add_special_tokens=False)
             resp.output_tokens = list(output_tokens)
             resp.output_logprobs = [0.0] * len(output_tokens)
             resp.output_versions = [-1] * len(output_tokens)
