@@ -14,6 +14,7 @@ only LLM generation goes through a Worker.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import json5
@@ -119,6 +120,14 @@ class SearchAgentController(Controller):
             return await real_visit(urls, goal)
         return f"Error: Tool {tool_name} not found"
 
+    def _execute_tool_sync(self, tool_name: str, tool_args: dict) -> str:
+        """Execute the async tool call without nesting event loops."""
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                asyncio.run, self._execute_tool(tool_name, tool_args)
+            )
+            return future.result()
+
     # ------------------------------------------------------------------
     # Controller interface
     # ------------------------------------------------------------------
@@ -151,12 +160,16 @@ class SearchAgentController(Controller):
             # Reserve room for max_new_tokens so the request won't exceed
             # the SGLang context window.
             max_new = self.generation_controller.sampling_params.get("max_tokens", 2048)
-            if token_count + max_new > self.max_total_tokens:
+            if (
+                token_count + max_new + self._token_safety_margin
+                > self.max_total_tokens
+            ):
                 logger.info(
-                    "Token budget approaching limit (%d + %d > %d); "
+                    "Token budget approaching limit (%d + %d + %d > %d); "
                     "requesting final answer.",
                     token_count,
                     max_new,
+                    self._token_safety_margin,
                     self.max_total_tokens,
                 )
                 chat_task.add_message(
@@ -197,13 +210,7 @@ class SearchAgentController(Controller):
                     tool_name = tool_call["name"]
                     tool_args = tool_call.get("arguments", {})
                     # Execute tool (async → sync bridge)
-                    loop = asyncio.new_event_loop()
-                    try:
-                        result = loop.run_until_complete(
-                            self._execute_tool(tool_name, tool_args)
-                        )
-                    finally:
-                        loop.close()
+                    result = self._execute_tool_sync(tool_name, tool_args)
                 except Exception as e:
                     result = (
                         f"Error: {e} Tool call must be valid JSON with "
